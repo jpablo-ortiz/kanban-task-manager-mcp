@@ -1,19 +1,28 @@
 import { v4 as uuidv4 } from 'uuid';
 import { Database as Db } from 'better-sqlite3'; // Import Db type
 import { ProjectRepository, ProjectData } from '../repositories/ProjectRepository.js';
-import { TaskRepository, TaskData, DependencyData } from '../repositories/TaskRepository.js';
+import { TaskRepository, TaskData } from '../repositories/TaskRepository.js';
 import { logger } from '../utils/logger.js';
-import { NotFoundError, ValidationError, ConflictError } from '../utils/errors.js'; // Import errors
+import {
+    NotFoundError,
+    ValidationError,
+    ConflictError,
+    RepositoryNotFoundError,
+    RepositoryConflictError,
+    RepositoryForeignKeyConstraintError
+} from '../utils/errors.js';
+import { projectImportSchema, ValidatedProjectImportData } from '../types/projectImportSchema.js';
 
-// Define structure for the export/import JSON
+// Interfaces for exportProject - these were locally defined before, ensuring they exist
+// These might be slightly different from ValidatedProjectImportData as they reflect DB state.
 interface ExportTask extends TaskData {
-    dependencies: string[]; // List of task IDs this task depends on
-    subtasks: ExportTask[]; // Nested subtasks
+    dependencies: string[];
+    subtasks: ExportTask[];
 }
 
 interface ExportData {
     project_metadata: ProjectData;
-    tasks: ExportTask[]; // Root tasks
+    tasks: ExportTask[];
 }
 
 
@@ -51,26 +60,30 @@ export class ProjectService {
             return newProject;
         } catch (error) {
             logger.error(`[ProjectService] Error creating project ${projectId}:`, error);
-            throw error;
+            if (error instanceof RepositoryConflictError) {
+                throw new ConflictError(error.message);
+            }
+            // For other specific repository errors, map them if necessary
+            throw error; // Re-throw other errors
         }
     }
 
     /**
      * Retrieves a project by its ID.
      */
-    public async getProjectById(projectId: string): Promise<ProjectData | undefined> {
+    public async getProjectById(projectId: string): Promise<ProjectData> {
         logger.info(`[ProjectService] Attempting to find project: ${projectId}`);
         try {
             const project = this.projectRepository.findById(projectId);
-            if (project) {
-                logger.info(`[ProjectService] Found project: ${projectId}`);
-            } else {
-                logger.warn(`[ProjectService] Project not found: ${projectId}`);
-            }
+            // findById in repo now throws RepositoryNotFoundError if not found.
+            logger.info(`[ProjectService] Found project: ${projectId}`);
             return project;
         } catch (error) {
             logger.error(`[ProjectService] Error finding project ${projectId}:`, error);
-            throw error;
+            if (error instanceof RepositoryNotFoundError) {
+                throw new NotFoundError(error.message);
+            }
+            throw error; // Re-throw other errors
         }
     }
 
@@ -79,11 +92,8 @@ export class ProjectService {
      */
     public async exportProject(projectId: string): Promise<string> {
         logger.info(`[ProjectService] Attempting to export project: ${projectId}`);
-        const projectMetadata = this.projectRepository.findById(projectId);
-        if (!projectMetadata) {
-            logger.warn(`[ProjectService] Project not found for export: ${projectId}`);
-            throw new NotFoundError(`Project with ID ${projectId} not found.`);
-        }
+        // getProjectById will throw NotFoundError if project doesn't exist
+        const projectMetadata = await this.getProjectById(projectId);
 
         try {
             const allTasks = this.taskRepository.findAllTasksForProject(projectId);
@@ -139,82 +149,107 @@ export class ProjectService {
      */
     public async importProject(projectDataString: string, newProjectName?: string): Promise<{ project_id: string }> {
         logger.info(`[ProjectService] Attempting to import project...`);
-        let importData: ExportData;
-        try {
-            if (projectDataString.length > 10 * 1024 * 1024) { // Example 10MB limit
-                throw new ValidationError('Input data exceeds size limit (e.g., 10MB).');
-            }
-            importData = JSON.parse(projectDataString);
-            // TODO: Implement rigorous schema validation (Zod?)
-            if (!importData || !importData.project_metadata || !Array.isArray(importData.tasks)) {
-                throw new ValidationError('Invalid import data structure: Missing required fields.');
-            }
-            logger.debug(`[ProjectService] Successfully parsed import data.`);
-        } catch (error) {
-            logger.error('[ProjectService] Failed to parse or validate import JSON:', error);
-            if (error instanceof SyntaxError) {
-                throw new ValidationError(`Invalid JSON format: ${error.message}`);
-            }
-            throw new ValidationError(`Invalid import data: ${error instanceof Error ? error.message : 'Unknown validation error'}`);
+
+        if (projectDataString.length > 10 * 1024 * 1024) { // Example 10MB limit
+            logger.warn('[ProjectService] Import data exceeds size limit.');
+            throw new ValidationError('Input data exceeds size limit (e.g., 10MB).');
         }
+
+        let parsedJson: unknown;
+        try {
+            parsedJson = JSON.parse(projectDataString);
+        } catch (error) {
+            logger.error('[ProjectService] Failed to parse import JSON:', error);
+            throw new ValidationError(`Invalid JSON format: ${error instanceof Error ? error.message : 'Unknown parsing error'}`);
+        }
+
+        const validationResult = projectImportSchema.safeParse(parsedJson);
+
+        if (!validationResult.success) {
+            const errorMessages = validationResult.error.errors.map(err => {
+                return `${err.path.join('.')} - ${err.message}`;
+            });
+            logger.warn('[ProjectService] Import data validation failed:', errorMessages);
+            throw new ValidationError(`Invalid project data format: ${errorMessages.join('; ')}`);
+        }
+
+        const importData: ValidatedProjectImportData = validationResult.data;
+        logger.debug(`[ProjectService] Successfully parsed and validated import data.`);
+
+        // The TODO for schema validation is now addressed.
+        // TODO: Implement rigorous schema validation (Zod?) - This is now handled above.
 
         const importTransaction = this.db.transaction(() => {
             const newProjectId = uuidv4();
             const now = new Date().toISOString();
-            const finalProjectName = newProjectName?.trim() || `${importData.project_metadata.name} (Imported ${now})`;
-            const newProject: ProjectData = {
+            // Use validated name from importData
+            const finalProjectName = newProjectName?.trim() || `${importData.project_metadata.name} (Imported ${now})`; // Name from validated data
+            const newProjectData: ProjectData = { // Renamed to avoid conflict with 'newProject' outer scope var
                 project_id: newProjectId,
                 name: finalProjectName.substring(0, 255),
                 created_at: now,
             };
-            this.projectRepository.create(newProject);
+            this.projectRepository.create(newProjectData); // Use renamed variable
             logger.info(`[ProjectService] Created new project ${newProjectId} for import.`);
 
             const idMap = new Map<string, string>();
-            const processTask = (task: ExportTask, parentDbId: string | null) => {
+
+            // Recursive function to process tasks and their subtasks
+            const processTask = (taskFromFile: ValidatedProjectImportData['tasks'][number], parentDbId: string | null) => {
                 const newTaskId = uuidv4();
-                idMap.set(task.task_id, newTaskId);
+                idMap.set(taskFromFile.task_id, newTaskId); // Map old ID to new ID
+
                 const newTaskData: TaskData = {
                     task_id: newTaskId,
                     project_id: newProjectId,
                     parent_task_id: parentDbId,
-                    description: task.description,
-                    status: task.status,
-                    priority: task.priority,
-                    created_at: task.created_at,
-                    updated_at: task.updated_at,
+                    description: taskFromFile.description,
+                    status: taskFromFile.status,
+                    priority: taskFromFile.priority,
+                    created_at: taskFromFile.created_at, // Preserve original task timestamps
+                    updated_at: taskFromFile.updated_at,
                 };
-                this.taskRepository.create(newTaskData, []); // Create task first
-                if (task.subtasks && task.subtasks.length > 0) {
-                    task.subtasks.forEach(subtask => processTask(subtask, newTaskId));
+                // Create task without dependencies first, as they will be based on new IDs
+                this.taskRepository.create(newTaskData, []);
+
+                if (taskFromFile.subtasks && taskFromFile.subtasks.length > 0) {
+                    taskFromFile.subtasks.forEach(subtask => processTask(subtask, newTaskId));
                 }
             };
-            importData.tasks.forEach(rootTask => processTask(rootTask, null));
-            logger.info(`[ProjectService] Processed ${idMap.size} tasks for import.`);
 
+            importData.tasks.forEach(rootTask => processTask(rootTask, null));
+            logger.info(`[ProjectService] Processed ${idMap.size} tasks for import (creation phase).`);
+
+            // After all tasks are created and their new IDs are mapped, process dependencies
             const insertDependencyStmt = this.db.prepare(`
                 INSERT INTO task_dependencies (task_id, depends_on_task_id)
                 VALUES (?, ?) ON CONFLICT DO NOTHING
             `);
             let depCount = 0;
-            const processDeps = (task: ExportTask) => {
-                const newTaskId = idMap.get(task.task_id);
-                if (newTaskId && task.dependencies && task.dependencies.length > 0) {
-                    for (const oldDepId of task.dependencies) {
-                        const newDepId = idMap.get(oldDepId);
-                        if (newDepId) {
-                            insertDependencyStmt.run(newTaskId, newDepId);
+
+            const processDepsRecursively = (taskFromFile: ValidatedProjectImportData['tasks'][number]) => {
+                const newCurrentTaskId = idMap.get(taskFromFile.task_id); // Get the new ID for the current task
+                if (newCurrentTaskId && taskFromFile.dependencies && taskFromFile.dependencies.length > 0) {
+                    for (const oldDependencyId of taskFromFile.dependencies) {
+                        const newDependencyId = idMap.get(oldDependencyId); // Get the new ID for the dependency task
+                        if (newDependencyId) {
+                            if (newCurrentTaskId === newDependencyId) { // Check for self-dependency with new IDs
+                                logger.warn(`[ProjectService] Skipping self-dependency for task ${taskFromFile.description} (Old ID: ${taskFromFile.task_id})`);
+                                continue;
+                            }
+                            insertDependencyStmt.run(newCurrentTaskId, newDependencyId);
                             depCount++;
                         } else {
-                            logger.warn(`[ProjectService] Dependency task ID ${oldDepId} not found in import map for task ${task.task_id}. Skipping dependency.`);
+                            logger.warn(`[ProjectService] Dependency task with old ID ${oldDependencyId} not found in ID map for task ${taskFromFile.description}. Skipping dependency.`);
                         }
                     }
                 }
-                if (task.subtasks && task.subtasks.length > 0) {
-                    task.subtasks.forEach(processDeps);
+                if (taskFromFile.subtasks && taskFromFile.subtasks.length > 0) {
+                    taskFromFile.subtasks.forEach(processDepsRecursively);
                 }
             };
-            importData.tasks.forEach(processDeps);
+
+            importData.tasks.forEach(processDepsRecursively);
             logger.info(`[ProjectService] Processed ${depCount} dependencies for import.`);
 
             return { project_id: newProjectId };
@@ -226,9 +261,17 @@ export class ProjectService {
             return result;
         } catch (error) {
             logger.error(`[ProjectService] Error during import transaction:`, error);
-            if (error instanceof NotFoundError || error instanceof ValidationError || error instanceof ConflictError) {
-                throw error;
+            if (error instanceof RepositoryNotFoundError) {
+                throw new NotFoundError(error.message); // Should ideally not happen if all tasks exist by ID mapping
+            } else if (error instanceof RepositoryConflictError) {
+                throw new ConflictError(error.message); // e.g. task ID conflict if somehow UUIDs are not unique
+            } else if (error instanceof RepositoryForeignKeyConstraintError) {
+                // This might happen if a task's project_id or parent_task_id (after remapping) is invalid
+                throw new ValidationError(`Data integrity issue during import: ${error.message}`);
+            } else if (error instanceof NotFoundError || error instanceof ValidationError || error instanceof ConflictError) {
+                throw error; // Re-throw service-level errors
             }
+            // For other generic errors from DB or unexpected issues
             throw new Error(`Failed to import project: ${error instanceof Error ? error.message : 'Unknown database error'}`);
         }
     }
@@ -240,34 +283,71 @@ export class ProjectService {
      * @throws {NotFoundError} If the project is not found.
      * @throws {Error} If the database operation fails.
      */
-    public async deleteProject(projectId: string): Promise<boolean> {
+    public async deleteProject(projectId: string): Promise<void> {
         logger.info(`[ProjectService] Attempting to delete project: ${projectId}`);
-
-        // 1. Validate Project Existence *before* attempting delete
-        const projectExists = this.projectRepository.findById(projectId);
-        if (!projectExists) {
-            logger.warn(`[ProjectService] Project not found for deletion: ${projectId}`);
-            throw new NotFoundError(`Project with ID ${projectId} not found.`);
-        }
-
-        // 2. Call Repository delete method
         try {
-            // The repository method handles the actual DELETE operation on the projects table.
-            // Cascade delete defined in the schema handles tasks and dependencies.
-            const deletedCount = this.projectRepository.deleteProject(projectId);
-
-            if (deletedCount !== 1) {
-                // This shouldn't happen if findById succeeded, but log a warning if it does.
-                logger.warn(`[ProjectService] Expected to delete 1 project, but repository reported ${deletedCount} deletions for project ${projectId}.`);
-                // Still return true as the project is gone, but log indicates potential issue.
-            }
-
+            // projectRepository.deleteProject will throw RepositoryNotFoundError if not found.
+            // Also, getProjectById call was made before, which would throw service level NotFoundError.
+            // So, we can directly call delete.
+            this.projectRepository.deleteProject(projectId);
             logger.info(`[ProjectService] Successfully deleted project ${projectId} and associated data.`);
-            return true; // Indicate success
-
         } catch (error) {
             logger.error(`[ProjectService] Error deleting project ${projectId}:`, error);
-            throw error; // Re-throw database or other errors
+            if (error instanceof RepositoryNotFoundError) {
+                // This means it was found by getProjectById but then disappeared before delete,
+                // or if we removed the initial getProjectById check.
+                throw new NotFoundError(error.message);
+            }
+            throw error; // Re-throw other errors
+        }
+    }
+
+    public async updateProject(
+        projectId: string,
+        projectName: string
+    ): Promise<ProjectData> { // Corrected: ProjectData does not have updated_at
+        logger.info({ projectId, newName: projectName }, "Service attempting to update project name");
+
+        // Validate projectName length (e.g., 1-255 characters)
+        if (!projectName || projectName.trim().length === 0 || projectName.length > 255) {
+            throw new ValidationError("Project name must be between 1 and 255 characters.");
+        }
+        const trimmedProjectName = projectName.trim();
+
+        // First, check if the project exists using the existing getProjectById method
+        // This also ensures we are catching RepositoryNotFoundError and re-throwing it as NotFoundError.
+        // It also gives us the current project data.
+        const currentProject = await this.getProjectById(projectId); // Will throw NotFoundError if not found
+
+        // Optional: Check if the name is actually different
+        if (currentProject.name === trimmedProjectName) {
+            logger.info(`Project name for ${projectId} is already '${trimmedProjectName}'. No update performed.`);
+            return currentProject; // Return current project data as no change is needed
+        }
+
+        try {
+            this.projectRepository.update(projectId, trimmedProjectName);
+            // After successful update, fetch the updated project details to return.
+            // This will reflect the new name. `created_at` remains the same.
+            const updatedProject = await this.getProjectById(projectId);
+            logger.info({ project: updatedProject }, "Project updated successfully by service");
+            return updatedProject;
+        } catch (error) {
+            // The initial getProjectById should catch most "not found" cases.
+            // This catch block handles errors from the update operation itself or if the project
+            // disappeared between the find and update calls (a race condition).
+            if (error instanceof RepositoryNotFoundError) {
+                // This specific error from projectRepository.update implies the name was the same or project disappeared.
+                // If it was because the name was the same, we've already handled it above.
+                // So, this primarily means it disappeared post-check or another issue with update.
+                logger.warn({ error, projectId }, "Update failed: Project not found or name unchanged at repository level.");
+                // Re-fetch to confirm current state, which might throw NotFoundError if truly gone.
+                // This ensures consistency if the "no change" was the reason for RepositoryNotFoundError.
+                return this.getProjectById(projectId);
+            }
+            logger.error({ error, projectId, newName: trimmedProjectName }, "Error updating project in service");
+            // For other unexpected errors from the repository or elsewhere.
+            throw new Error(`Failed to update project: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
     }
 }

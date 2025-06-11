@@ -1,8 +1,15 @@
 import { v4 as uuidv4 } from 'uuid';
 import { TaskRepository, TaskData } from '../repositories/TaskRepository.js';
-import { ProjectRepository } from '../repositories/ProjectRepository.js'; // Needed to check project existence
+import { ProjectRepository } from '../repositories/ProjectRepository.js';
 import { logger } from '../utils/logger.js';
-import { NotFoundError, ValidationError } from '../utils/errors.js'; // Using custom errors
+import {
+    NotFoundError,
+    ValidationError,
+    ConflictError,
+    RepositoryNotFoundError,
+    RepositoryConflictError,
+    RepositoryForeignKeyConstraintError
+} from '../utils/errors.js';
 
 // Define the input structure for adding a task, based on feature spec
 export interface AddTaskInput {
@@ -41,7 +48,7 @@ export interface ExpandTaskInput {
 
 
 import { Database as Db } from 'better-sqlite3'; // Import Db type
-import { ConflictError } from '../utils/errors.js'; // Import ConflictError
+// ConflictError is already imported via the wildcard from ../utils/errors.js
 
 export class TaskService {
     private taskRepository: TaskRepository;
@@ -71,6 +78,24 @@ export class TaskService {
 
         const taskId = uuidv4();
         const now = new Date().toISOString();
+
+        // Validate dependencies before creating the task data object
+        if (input.dependencies && input.dependencies.length > 0) {
+            // Check for self-dependency
+            if (input.dependencies.includes(taskId)) {
+                logger.warn(`[TaskService] Attempt to create task ${taskId} with self-dependency.`);
+                throw new ValidationError("Task cannot depend on itself.");
+            }
+
+            // Validate existence of dependency tasks
+            const depCheck = this.taskRepository.checkTasksExist(input.project_id, input.dependencies);
+            if (!depCheck.allExist) {
+                logger.warn(`[TaskService] Invalid dependencies provided for new task:`, depCheck.missingIds);
+                throw new ValidationError(`Invalid dependencies: The following task IDs do not exist or do not belong to the project: ${depCheck.missingIds?.join(', ')}`);
+            }
+            logger.info(`[TaskService] Dependency validation passed for new task in project ${input.project_id}.`);
+        }
+
         const newTaskData: TaskData = {
             task_id: taskId,
             project_id: input.project_id,
@@ -82,7 +107,9 @@ export class TaskService {
             updated_at: now,
         };
 
-        // TODO: Validate Dependency Existence
+        // Dependency validation has been performed above.
+        // The TODO comment below can be removed or updated.
+        // TODO: Validate that dependency tasks exist and belong to the same project. (This is now handled above)
 
         try {
             this.taskRepository.create(newTaskData, input.dependencies);
@@ -90,7 +117,18 @@ export class TaskService {
             return newTaskData;
         } catch (error) {
             logger.error(`[TaskService] Error adding task to project ${input.project_id}:`, error);
-            throw error;
+            if (error instanceof RepositoryConflictError) {
+                throw new ConflictError(error.message);
+            } else if (error instanceof RepositoryForeignKeyConstraintError) {
+                // This could happen if project_id became invalid between check and creation, though unlikely here.
+                // Or if parent_task_id was ever set directly by addTask with an invalid one.
+                throw new ValidationError(`Invalid reference: ${error.message}`);
+            } else if (error instanceof ValidationError || error instanceof NotFoundError) {
+                // Re-throw service-level validation/notfound errors directly
+                throw error;
+            }
+            // For other generic errors
+            throw new Error(`Failed to add task: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
     }
 
@@ -140,17 +178,14 @@ export class TaskService {
      */
     public async getTaskById(projectId: string, taskId: string): Promise<FullTaskData> {
         logger.info(`[TaskService] Attempting to get task ${taskId} for project ${projectId}`);
-        const task = this.taskRepository.findById(projectId, taskId);
-        if (!task) {
-            logger.warn(`[TaskService] Task ${taskId} not found in project ${projectId}`);
-            throw new NotFoundError(`Task with ID ${taskId} not found in project ${projectId}.`);
-        }
-
         try {
+            // Repository findById now throws RepositoryNotFoundError if not found.
+            const task = this.taskRepository.findById(projectId, taskId);
+
             const dependencies = this.taskRepository.findDependencies(taskId);
-            const subtasks = this.taskRepository.findSubtasks(taskId);
+            const subtasks = this.taskRepository.findSubtasks(taskId); // Assuming this also handles errors or returns empty []
             const fullTaskData: FullTaskData = {
-                ...task,
+                ...task, // task is guaranteed to be defined here due to repo throwing on not found
                 dependencies: dependencies,
                 subtasks: subtasks,
             };
@@ -158,7 +193,11 @@ export class TaskService {
             return fullTaskData;
         } catch (error) {
             logger.error(`[TaskService] Error retrieving details for task ${taskId}:`, error);
-            throw error;
+            if (error instanceof RepositoryNotFoundError) {
+                throw new NotFoundError(error.message);
+            }
+            // For other generic errors
+            throw new Error(`Failed to retrieve task details: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
     }
 
@@ -181,15 +220,22 @@ export class TaskService {
 
         try {
             const now = new Date().toISOString();
+            // Assuming taskRepository.updateStatus doesn't throw RepositoryNotFoundError for individual tasks
+            // as checkTasksExist is called before. If it could, it should be caught.
             const updatedCount = this.taskRepository.updateStatus(projectId, taskIds, status, now);
+
             if (updatedCount !== taskIds.length) {
-                logger.warn(`[TaskService] Expected to update ${taskIds.length} tasks, but ${updatedCount} were affected.`);
+                // This implies some tasks were not updated, which is unexpected if checkTasksExist passed.
+                // Could be a race condition or an issue in updateStatus logic if it filters further.
+                logger.warn(`[TaskService] Expected to update ${taskIds.length} tasks, but only ${updatedCount} were affected.`);
+                // Potentially throw a specific error here if this is considered critical.
             }
             logger.info(`[TaskService] Successfully updated status for ${updatedCount} tasks in project ${projectId}`);
             return updatedCount;
         } catch (error) {
             logger.error(`[TaskService] Error setting status for tasks in project ${projectId}:`, error);
-            throw error;
+            // Map potential repository errors if any are defined for updateStatus
+            throw new Error(`Failed to set task status: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
 }
 
@@ -211,11 +257,8 @@ export class TaskService {
         // Use a transaction for the entire operation
         const expandTransaction = this.db.transaction(() => {
             // 1. Validate Parent Task Existence (within the transaction)
+            // Repository findById now throws RepositoryNotFoundError
             const parentTask = this.taskRepository.findById(project_id, parentTaskId);
-            if (!parentTask) {
-                logger.warn(`[TaskService] Parent task ${parentTaskId} not found in project ${project_id}`);
-                throw new NotFoundError(`Parent task with ID ${parentTaskId} not found in project ${project_id}.`);
-            }
 
             // 2. Check for existing subtasks
             const existingSubtasks = this.taskRepository.findSubtasks(parentTaskId);
@@ -274,8 +317,14 @@ export class TaskService {
             return result;
         } catch (error) {
             logger.error(`[TaskService] Error expanding task ${parentTaskId}:`, error);
-            // Re-throw specific errors or generic internal error
-            if (error instanceof NotFoundError || error instanceof ConflictError) {
+            if (error instanceof RepositoryNotFoundError) { // From parentTask lookup or sub-operations
+                throw new NotFoundError(error.message);
+            } else if (error instanceof RepositoryConflictError) { // From sub-task creation
+                throw new ConflictError(error.message);
+            } else if (error instanceof RepositoryForeignKeyConstraintError) { // From sub-task creation
+                throw new ValidationError(`Invalid reference during sub-task creation: ${error.message}`);
+            } else if (error instanceof NotFoundError || error instanceof ConflictError || error instanceof ValidationError) {
+                // Re-throw service-level errors
                 throw error;
             }
             throw new Error(`Failed to expand task: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -307,22 +356,23 @@ export class TaskService {
 
             if (readyTasks.length === 0) {
                 logger.info(`[TaskService] No ready tasks found for project ${projectId}`);
-                return null; // No task is ready
+                return null;
             }
 
-            // 3. The first task in the list is the highest priority one due to repo ordering
-            const nextTask = readyTasks[0];
-            logger.info(`[TaskService] Next task identified: ${nextTask.task_id}`);
+            const nextTaskData = readyTasks[0];
+            logger.info(`[TaskService] Next task candidate identified: ${nextTaskData.task_id}`);
 
-            // 4. Fetch full details (dependencies, subtasks) for the selected task
-            // We could potentially optimize this if findReadyTasks returned more details,
-            // but for separation of concerns, we call getTaskById logic (or similar).
-            // Re-using getTaskById logic:
-            return await this.getTaskById(projectId, nextTask.task_id);
+            // Fetch full details, which will also confirm its existence via getTaskById's internal checks
+            return await this.getTaskById(projectId, nextTaskData.task_id);
 
         } catch (error) {
             logger.error(`[TaskService] Error getting next task for project ${projectId}:`, error);
-            throw error; // Re-throw repository or other errors
+            // getTaskById already maps RepositoryNotFoundError to NotFoundError
+            if (error instanceof NotFoundError) {
+                throw error; // If getTaskById threw NotFoundError (e.g. task disappeared)
+            }
+            // For other generic errors
+            throw new Error(`Failed to get next task: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
     }
 
@@ -356,13 +406,9 @@ export class TaskService {
             throw new NotFoundError(`Project with ID ${project_id} not found.`);
         }
 
-        // 3. Validate Task Existence (using repo method - findById also implicitly checks project scope)
-        // We need the task data anyway if dependencies are involved, so fetch it now.
+        // 3. Validate Task Existence. Repo findById now throws RepositoryNotFoundError.
+        // This call will throw if task not found, which will be caught and re-thrown as NotFoundError.
         const existingTask = this.taskRepository.findById(project_id, task_id);
-        if (!existingTask) {
-            logger.warn(`[TaskService] Task ${task_id} not found in project ${project_id}`);
-            throw new NotFoundError(`Task with ID ${task_id} not found in project ${project_id}.`);
-        }
 
         // 4. Validate Dependency Existence if provided
         if (input.dependencies !== undefined) {
@@ -408,12 +454,17 @@ export class TaskService {
 
         } catch (error) {
             logger.error(`[TaskService] Error updating task ${task_id} in project ${project_id}:`, error);
-            // Re-throw specific errors if needed, otherwise let the generic error propagate
-             if (error instanceof Error && error.message.includes('not found')) {
-                 // Map repo's generic error for not found back to specific NotFoundError
-                 throw new NotFoundError(error.message);
-             }
-            throw error; // Re-throw other errors (like DB constraint errors or unexpected ones)
+            // Re-throw specific errors if needed
+            if (error instanceof RepositoryNotFoundError) {
+                throw new NotFoundError(error.message); // From updateTask's internal findById if task vanished
+            } else if (error instanceof RepositoryForeignKeyConstraintError) {
+                // This could happen if a dependency ID is invalid during the update of dependencies
+                throw new ValidationError(`Invalid dependency reference during update: ${error.message}`);
+            } else if (error instanceof ValidationError || error instanceof NotFoundError || error instanceof ConflictError) {
+                throw error; // Re-throw service-level errors
+            }
+            // For other generic errors
+            throw new Error(`Failed to update task: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
     }
 
@@ -447,14 +498,16 @@ export class TaskService {
 
         // 3. Call Repository delete method
         try {
-            // The repository method handles the actual DELETE operation
+            // Repository deleteTasks might throw RepositoryNotFoundError if no tasks were found.
+            // However, we've already validated existence with checkTasksExist.
+            // If it still returns 0, it's an anomaly or they disappeared.
             const deletedCount = this.taskRepository.deleteTasks(projectId, taskIds);
 
-            // Double-check count (optional, but good sanity check)
             if (deletedCount !== taskIds.length) {
-                logger.warn(`[TaskService] Expected to delete ${taskIds.length} tasks, but repository reported ${deletedCount} deletions.`);
-                // This might indicate a race condition or unexpected DB behavior, though unlikely with cascade.
-                // For V1, we'll trust the repo count but log the warning.
+                // This is a stronger indication of an issue now, as existence was pre-checked.
+                logger.error(`[TaskService] Discrepancy in delete count. Expected ${taskIds.length}, got ${deletedCount}. Tasks might have been deleted concurrently.`);
+                // Consider throwing an error if strict atomicity is paramount and this indicates a problem.
+                // For now, log and return the actual count.
             }
 
             logger.info(`[TaskService] Successfully deleted ${deletedCount} tasks from project ${projectId}`);
@@ -462,7 +515,9 @@ export class TaskService {
 
         } catch (error) {
             logger.error(`[TaskService] Error deleting tasks from project ${projectId}:`, error);
-            throw error; // Re-throw database or other errors
+            // Map specific repository errors if defined for deleteTasks
+            // For now, assume it throws generic errors for DB issues.
+            throw new Error(`Failed to delete tasks: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
     }
 
