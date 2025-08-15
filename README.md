@@ -16,7 +16,7 @@ This server acts as a persistent backend for local MCP clients (like AI agents o
 * **SQLite Persistence:** Uses a local SQLite file (`./data/taskmanager.db` by default) for simple, self-contained data storage.
 * **Client-Driven:** Provides tools for clients; does not dictate workflow.
 * **MCP Compliant:** Adheres to the Model Context Protocol for tool definition and communication.
-* **Task Management:** Supports creating projects, adding tasks, listing/showing tasks, updating status, expanding tasks into subtasks, and identifying the next actionable task.
+* **Project & Task Management:** Supports creating and updating projects; adding tasks, listing/showing tasks, updating status, expanding tasks into subtasks, and identifying the next actionable task.
 * **Import/Export:** Allows exporting project data to JSON and importing from JSON to create new projects.
 
 ## Implemented MCP Tools
@@ -26,7 +26,13 @@ The following tools are available for MCP clients:
 * **`createProject`**:
   * **Description:** Creates a new, empty project.
   * **Params:** `projectName` (string, optional, max 255)
-  * **Returns:** `{ project_id: string }`
+  * **Returns:** The created `ProjectData` object (e.g., `{ project_id: string, name: string, created_at: string }`).
+* **`updateProject`**:
+  * **Description:** Updates the name of an existing project.
+  * **Params:**
+    * `project_id` (string, required, UUID) - The ID of the project to update.
+    * `project_name` (string, required, 1-255 characters) - The new name for the project.
+  * **Returns:** The updated `ProjectData` object (e.g., `{ project_id: string, name: string, created_at: string }`). Note: `updated_at` is not part of the project data in the current schema.
 * **`addTask`**:
   * **Description:** Adds a new task to a project.
   * **Params:** `project_id` (string, required, UUID), `description` (string, required, 1-1024), `dependencies` (string[], optional, max 50), `priority` (enum 'high'|'medium'|'low', optional, default 'medium'), `status` (enum 'todo'|'in-progress'|'review'|'done', optional, default 'todo')

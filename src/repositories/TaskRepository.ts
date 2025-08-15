@@ -1,5 +1,6 @@
-import { Database as Db, Statement } from 'better-sqlite3';
+import { Database as Db, Statement, SqliteError } from 'better-sqlite3';
 import { logger } from '../utils/logger.js';
+import { RepositoryNotFoundError, RepositoryConflictError, RepositoryForeignKeyConstraintError } from '../utils/errors.js';
 
 // Define the structure for task data in the database
 // Aligning with schema.sql and feature specs
@@ -70,22 +71,36 @@ export class TaskRepository {
 
         // Use a transaction for atomicity
         const transaction = this.db.transaction((taskData: TaskData, deps: string[]) => {
-            // Insert the main task
-            const taskInfo = this.insertTaskStmt!.run(taskData);
-            if (taskInfo.changes !== 1) {
-                throw new Error(`Failed to insert task ${taskData.task_id}. Changes: ${taskInfo.changes}`);
-            }
+            try {
+                // Insert the main task
+                const taskInfo = this.insertTaskStmt!.run(taskData);
+                // changes !== 1 can happen if task_id is not unique (PK violation)
+                // better-sqlite3 throws an error for PK violation, which is caught below.
 
-            // Insert dependencies
-            for (const depId of deps) {
-                const depData: DependencyData = {
-                    task_id: taskData.task_id,
-                    depends_on_task_id: depId,
-                };
-                const depInfo = this.insertDependencyStmt!.run(depData);
-                // We don't strictly need to check changes here due to ON CONFLICT DO NOTHING
+                // Insert dependencies
+                for (const depId of deps) {
+                    const depData: DependencyData = {
+                        task_id: taskData.task_id,
+                        depends_on_task_id: depId,
+                    };
+                    this.insertDependencyStmt!.run(depData);
+                    // ON CONFLICT DO NOTHING, so changes might be 0 if dependency already exists.
+                }
+                return taskInfo.changes;
+            } catch (err) {
+                if (err instanceof SqliteError) {
+                    if (err.code === 'SQLITE_CONSTRAINT_PRIMARYKEY') {
+                        throw new RepositoryConflictError(`Task with ID ${taskData.task_id} already exists.`);
+                    }
+                    // Check for foreign key on project_id or parent_task_id
+                    if (err.code === 'SQLITE_CONSTRAINT_FOREIGNKEY') {
+                         // More specific message could be crafted if we knew which FK failed,
+                         // but this is generally good enough for the repository layer.
+                        throw new RepositoryForeignKeyConstraintError(`Foreign key constraint failed when creating task ${taskData.task_id}. Project or parent task may not exist. Original: ${err.message}`, err);
+                    }
+                }
+                throw err; // Re-throw other errors
             }
-            return taskInfo.changes; // Indicate success
         });
 
         try {
@@ -93,7 +108,8 @@ export class TaskRepository {
             logger.info(`[TaskRepository] Created task ${task.task_id} with ${dependencies.length} dependencies.`);
         } catch (error) {
             logger.error(`[TaskRepository] Failed to create task ${task.task_id} transaction:`, error);
-            throw error; // Re-throw to be handled by the service layer
+            // Re-throw to be handled by the service layer, including our custom repository errors
+            throw error;
         }
     }
 
@@ -140,7 +156,7 @@ export class TaskRepository {
      * @param taskId - The task ID.
      * @returns The task data if found, otherwise undefined.
      */
-    public findById(projectId: string, taskId: string): TaskData | undefined {
+    public findById(projectId: string, taskId: string): TaskData {
         const sql = `
             SELECT task_id, project_id, parent_task_id, description, status, priority, created_at, updated_at
             FROM tasks
@@ -149,11 +165,15 @@ export class TaskRepository {
         try {
             const stmt = this.db.prepare(sql);
             const task = stmt.get(projectId, taskId) as TaskData | undefined;
-            logger.debug(`[TaskRepository] Found task ${taskId} in project ${projectId}: ${!!task}`);
+            if (!task) {
+                throw new RepositoryNotFoundError(`Task with id ${taskId} in project ${projectId} not found.`);
+            }
+            logger.debug(`[TaskRepository] Found task ${taskId} in project ${projectId}`);
             return task;
         } catch (error) {
             logger.error(`[TaskRepository] Failed to find task ${taskId} in project ${projectId}:`, error);
-            throw error;
+            if (error instanceof RepositoryNotFoundError) throw error;
+            throw error; // Re-throw other errors
         }
     }
 
@@ -435,28 +455,28 @@ export class TaskRepository {
                 const info = updateStmt.run(...params);
                 changes = info.changes;
 
-                if (changes !== 1) {
-                    // Check if the task actually exists before throwing generic error
-                    const exists = this.findById(projectId, taskId);
-                    if (!exists) {
-                         throw new Error(`Task ${taskId} not found in project ${projectId}.`); // Will be caught and mapped later
-                    } else {
-                        throw new Error(`Failed to update task ${taskId}. Expected 1 change, got ${changes}.`);
-                    }
+                if (changes === 0) {
+                    // Check if the task actually exists to differentiate "not found" from "no actual change"
+                    // This call to findById might throw RepositoryNotFoundError if task doesn't exist
+                    this.findById(projectId, taskId);
+                    // If findById didn't throw, it means task exists but no fields were changed by the update.
+                    // This can happen if new values are same as old values. Not necessarily an error.
+                    logger.warn(`[TaskRepository] Update for task ${taskId} resulted in 0 changes, possibly new data matches old data.`);
+                } else {
+                    logger.debug(`[TaskRepository] Updated task ${taskId} fields.`);
                 }
-                logger.debug(`[TaskRepository] Updated task ${taskId} fields.`);
             }
 
 
             // Handle dependencies if provided (replaces existing)
             if (updatePayload.dependencies !== undefined) {
                 if (!this.insertDependencyStmt) {
+                    // This should ideally be caught by prepareStatements not being run.
                     throw new Error('TaskRepository insertDependencyStmt not initialized.');
                 }
                 // 1. Delete existing dependencies for this task
                 const deleteDepsStmt = this.db.prepare(`DELETE FROM task_dependencies WHERE task_id = ?`);
-                const deleteInfo = deleteDepsStmt.run(taskId);
-                logger.debug(`[TaskRepository] Deleted ${deleteInfo.changes} existing dependencies for task ${taskId}.`);
+                deleteDepsStmt.run(taskId); // No need to check changes for delete
 
                 // 2. Insert new dependencies
                 const newDeps = updatePayload.dependencies;
@@ -465,19 +485,21 @@ export class TaskRepository {
                         task_id: taskId,
                         depends_on_task_id: depId,
                     };
-                    // ON CONFLICT DO NOTHING handles duplicates or self-references if schema allows
-                    this.insertDependencyStmt.run(depData);
+                    try {
+                        this.insertDependencyStmt.run(depData);
+                    } catch (err) {
+                        if (err instanceof SqliteError && err.code === 'SQLITE_CONSTRAINT_FOREIGNKEY') {
+                            throw new RepositoryForeignKeyConstraintError(`Foreign key constraint failed when adding dependency ${depId} to task ${taskId}. Dependency task may not exist. Original: ${err.message}`, err);
+                        }
+                        throw err; // Re-throw other errors
+                    }
                 }
-                logger.debug(`[TaskRepository] Inserted ${newDeps.length} new dependencies for task ${taskId}.`);
+                logger.debug(`[TaskRepository] Set ${newDeps.length} dependencies for task ${taskId}.`);
             }
 
             // Fetch and return the updated task data
-            const updatedTask = this.findById(projectId, taskId);
-            if (!updatedTask) {
-                // Should not happen if update succeeded, but safety check
-                throw new Error(`Failed to retrieve updated task ${taskId} after update.`);
-            }
-            return updatedTask;
+            // This findById will throw RepositoryNotFoundError if the task somehow disappeared.
+            return this.findById(projectId, taskId);
         });
 
         try {
@@ -486,7 +508,11 @@ export class TaskRepository {
             return result;
         } catch (error) {
             logger.error(`[TaskRepository] Failed transaction for updating task ${taskId}:`, error);
-            throw error; // Re-throw to be handled by the service layer
+            if (error instanceof RepositoryNotFoundError || error instanceof RepositoryForeignKeyConstraintError || error instanceof RepositoryConflictError) {
+                throw error;
+            }
+            // Could wrap other errors in a generic RepositoryError if desired
+            throw error;
         }
     }
 
@@ -515,11 +541,18 @@ export class TaskRepository {
         try {
             const stmt = this.db.prepare(sql);
             const info = stmt.run(...params);
+            if (info.changes === 0 && taskIds.length > 0) {
+                // This implies none of the specified tasks were found for this project.
+                // Note: Service layer should ideally check existence first if this specific error is needed.
+                // For now, returning 0 changes is the existing behavior.
+                // Consider: throw new RepositoryNotFoundError(`No tasks found with provided IDs in project ${projectId} to delete.`);
+            }
             logger.info(`[TaskRepository] Deleted ${info.changes} tasks from project ${projectId}.`);
             // Note: Cascade deletes for subtasks/dependencies happen automatically via schema.
             return info.changes;
         } catch (error) {
             logger.error(`[TaskRepository] Failed to delete tasks from project ${projectId}:`, error);
+            // No specific SQLite errors expected here other than general DB issues.
             throw error;
         }
     }
