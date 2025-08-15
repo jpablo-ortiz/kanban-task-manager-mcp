@@ -6,10 +6,10 @@ import {
   TOOL_PARAMS,
   CreateProjectArgs,
 } from "./createProjectParams.js";
-import { ProjectService } from "../services/ProjectService.js"; // Assuming ProjectService is exported from services/index.js or directly
-import { logger } from "../utils/logger.js"; // Assuming logger exists
+import { ProjectService } from "../../../services/index.js"; // Assuming ProjectService is exported from services/index.js or directly
+import { logger } from "../../../utils/index.js"; // Assuming logger exists
 // Import custom errors if needed for specific mapping
-// import { ServiceError } from "../utils/errors.js";
+// import { ServiceError } from "../../../utils/errors.js";
 
 /**
  * Registers the createProject tool with the MCP server.

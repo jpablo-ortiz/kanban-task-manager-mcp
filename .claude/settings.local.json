@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(npm run build:*)",
-      "Bash(npm run lint)"
+      "Bash(npm run lint)",
+      "Bash(mkdir:*)",
+      "Bash(mv:*)",
+      "Bash(powershell:*)",
+      "Bash(find:*)"
     ],
     "defaultMode": "acceptEdits"
   }

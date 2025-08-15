@@ -6,9 +6,9 @@ import {
   TOOL_PARAMS,
   AddTaskArgs,
 } from "./addTaskParams.js";
-import { TaskService } from "../services/TaskService.js"; // Assuming TaskService is exported via services/index.js
-import { logger } from "../utils/logger.js";
-import { NotFoundError, ValidationError } from "../utils/errors.js"; // Import custom errors
+import { TaskService } from "../../../services/index.js"; // Assuming TaskService is exported via services/index.js
+import { logger } from "../../../utils/index.js";
+import { NotFoundError, ValidationError } from "../../../utils/errors.js"; // Import custom errors
 
 /**
  * Registers the addTask tool with the MCP server.

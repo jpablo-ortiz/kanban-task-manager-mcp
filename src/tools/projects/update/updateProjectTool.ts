@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
-import { ProjectService } from "../services/index.js"; // Assuming ProjectService is exported from services/index.ts
-import { logger } from "../utils/index.js"; // Assuming logger is exported from utils/index.ts
+import { ProjectService } from "../../../services/index.js"; // Assuming ProjectService is exported from services/index.ts
+import { logger } from "../../../utils/index.js"; // Assuming logger is exported from utils/index.ts
 import {
   UpdateProjectParamsSchema,
   UpdateProjectParams,
@@ -10,7 +10,7 @@ import {
   NotFoundError,
   ValidationError,
   ConflictError,
-} from "../utils/errors.js"; // Import service level errors
+} from "../../../utils/errors.js"; // Import service level errors
 
 export const updateProjectTool = (
   server: McpServer,

@@ -6,9 +6,9 @@ import {
   TOOL_PARAMS,
   ListTasksArgs,
 } from "./listTasksParams.js";
-import { TaskService } from "../services/TaskService.js";
-import { logger } from "../utils/logger.js";
-import { NotFoundError } from "../utils/errors.js";
+import { TaskService } from "../../../services/index.js";
+import { logger } from "../../../utils/index.js";
+import { NotFoundError } from "../../../utils/errors.js";
 
 /**
  * Registers the listTasks tool with the MCP server.

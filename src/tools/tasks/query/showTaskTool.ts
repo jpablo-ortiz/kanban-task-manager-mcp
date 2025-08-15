@@ -4,42 +4,37 @@ import {
   TOOL_NAME,
   TOOL_DESCRIPTION,
   TOOL_PARAMS,
-  SetTaskStatusArgs,
-} from "./setTaskStatusParams.js";
-import { TaskService } from "../services/TaskService.js";
-import { logger } from "../utils/logger.js";
-import { NotFoundError } from "../utils/errors.js";
+  ShowTaskArgs,
+} from "./showTaskParams.js";
+import { TaskService } from "../../../services/index.js";
+import { logger } from "../../../utils/index.js";
+import { NotFoundError } from "../../../utils/errors.js";
 
 /**
- * Registers the setTaskStatus tool with the MCP server.
+ * Registers the showTask tool with the MCP server.
  *
  * @param server - The McpServer instance.
  * @param taskService - An instance of the TaskService.
  */
-export const setTaskStatusTool = (
+export const showTaskTool = (
   server: McpServer,
   taskService: TaskService
 ): void => {
-  const processRequest = async (args: SetTaskStatusArgs) => {
+  const processRequest = async (args: ShowTaskArgs) => {
     logger.info(`[${TOOL_NAME}] Received request with args:`, args);
     try {
-      // Call the service method to update the status
-      const updatedCount = await taskService.setTaskStatus(
-        args.project_id,
-        args.task_ids,
-        args.status
-      );
+      // Call the service method to get the task details
+      const task = await taskService.getTaskById(args.project_id, args.task_id);
 
       // Format the successful response
-      const responsePayload = { success: true, updated_count: updatedCount };
       logger.info(
-        `[${TOOL_NAME}] Updated status for ${updatedCount} tasks in project ${args.project_id}`
+        `[${TOOL_NAME}] Found task ${args.task_id} in project ${args.project_id}`
       );
       return {
         content: [
           {
             type: "text" as const,
-            text: JSON.stringify(responsePayload),
+            text: JSON.stringify(task), // Return the full task object
           },
         ],
       };
@@ -48,15 +43,15 @@ export const setTaskStatusTool = (
       logger.error(`[${TOOL_NAME}] Error processing request:`, error);
 
       if (error instanceof NotFoundError) {
-        // Specific error if the project or any task wasn't found
-        // Map to InvalidParams as the provided ID(s) are invalid
+        // Specific error if the project or task wasn't found
+        // Map to InvalidParams as the provided ID(s) are invalid in this context
         throw new McpError(ErrorCode.InvalidParams, error.message);
       } else {
         // Generic internal error
         const message =
           error instanceof Error
             ? error.message
-            : "An unknown error occurred while setting task status.";
+            : "An unknown error occurred while retrieving the task.";
         throw new McpError(ErrorCode.InternalError, message);
       }
     }

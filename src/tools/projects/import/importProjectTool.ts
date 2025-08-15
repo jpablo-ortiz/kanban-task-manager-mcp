@@ -6,9 +6,9 @@ import {
   TOOL_PARAMS,
   ImportProjectArgs,
 } from "./importProjectParams.js";
-import { ProjectService } from "../services/ProjectService.js";
-import { logger } from "../utils/logger.js";
-import { ValidationError } from "../utils/errors.js"; // Import specific errors
+import { ProjectService } from "../../../services/index.js";
+import { logger } from "../../../utils/index.js";
+import { ValidationError } from "../../../utils/errors.js"; // Import specific errors
 
 /**
  * Registers the importProject tool with the MCP server.

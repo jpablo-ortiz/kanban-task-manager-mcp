@@ -6,9 +6,9 @@ import {
   TOOL_PARAMS,
   DeleteProjectArgs,
 } from "./deleteProjectParams.js";
-import { ProjectService } from "../services/ProjectService.js"; // Assuming ProjectService is exported from index
-import { logger } from "../utils/logger.js";
-import { NotFoundError } from "../utils/errors.js"; // Import custom errors
+import { ProjectService } from "../../../services/index.js"; // Assuming ProjectService is exported from index
+import { logger } from "../../../utils/index.js";
+import { NotFoundError } from "../../../utils/errors.js"; // Import custom errors
 
 /**
  * Registers the deleteProject tool with the MCP server.

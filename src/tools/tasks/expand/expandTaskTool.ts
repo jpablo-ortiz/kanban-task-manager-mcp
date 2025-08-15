@@ -6,9 +6,9 @@ import {
   TOOL_PARAMS,
   ExpandTaskArgs,
 } from "./expandTaskParams.js";
-import { TaskService } from "../services/TaskService.js";
-import { logger } from "../utils/logger.js";
-import { NotFoundError, ConflictError } from "../utils/errors.js"; // Import specific errors
+import { TaskService } from "../../../services/index.js";
+import { logger } from "../../../utils/index.js";
+import { NotFoundError, ConflictError } from "../../../utils/errors.js"; // Import specific errors
 
 /**
  * Registers the expandTask tool with the MCP server.

@@ -4,37 +4,37 @@ import {
   TOOL_NAME,
   TOOL_DESCRIPTION,
   TOOL_PARAMS,
-  ShowTaskArgs,
-} from "./showTaskParams.js";
-import { TaskService } from "../services/TaskService.js";
-import { logger } from "../utils/logger.js";
-import { NotFoundError } from "../utils/errors.js";
+  ExportProjectArgs,
+} from "./exportProjectParams.js";
+import { ProjectService } from "../../../services/index.js"; // Assuming ProjectService is exported via services/index.js
+import { logger } from "../../../utils/index.js";
+import { NotFoundError } from "../../../utils/errors.js";
 
 /**
- * Registers the showTask tool with the MCP server.
+ * Registers the exportProject tool with the MCP server.
  *
  * @param server - The McpServer instance.
- * @param taskService - An instance of the TaskService.
+ * @param projectService - An instance of the ProjectService.
  */
-export const showTaskTool = (
+export const exportProjectTool = (
   server: McpServer,
-  taskService: TaskService
+  projectService: ProjectService
 ): void => {
-  const processRequest = async (args: ShowTaskArgs) => {
+  const processRequest = async (args: ExportProjectArgs) => {
     logger.info(`[${TOOL_NAME}] Received request with args:`, args);
     try {
-      // Call the service method to get the task details
-      const task = await taskService.getTaskById(args.project_id, args.task_id);
+      // Zod schema ensures format is 'json' if provided, or defaults to 'json'
+      const jsonString = await projectService.exportProject(args.project_id);
 
       // Format the successful response
       logger.info(
-        `[${TOOL_NAME}] Found task ${args.task_id} in project ${args.project_id}`
+        `[${TOOL_NAME}] Successfully exported project ${args.project_id}`
       );
       return {
         content: [
           {
             type: "text" as const,
-            text: JSON.stringify(task), // Return the full task object
+            text: jsonString, // Return the JSON string directly
           },
         ],
       };
@@ -43,15 +43,14 @@ export const showTaskTool = (
       logger.error(`[${TOOL_NAME}] Error processing request:`, error);
 
       if (error instanceof NotFoundError) {
-        // Specific error if the project or task wasn't found
-        // Map to InvalidParams as the provided ID(s) are invalid in this context
+        // Project not found
         throw new McpError(ErrorCode.InvalidParams, error.message);
       } else {
         // Generic internal error
         const message =
           error instanceof Error
             ? error.message
-            : "An unknown error occurred while retrieving the task.";
+            : "An unknown error occurred while exporting the project.";
         throw new McpError(ErrorCode.InternalError, message);
       }
     }

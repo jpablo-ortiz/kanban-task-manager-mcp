@@ -8,9 +8,9 @@ import {
   UPDATE_TASK_BASE_SCHEMA,
   UpdateTaskArgs,
 } from "./updateTaskParams.js";
-import { TaskService, FullTaskData } from "../services/TaskService.js"; // Assuming TaskService is exported from index
-import { logger } from "../utils/logger.js";
-import { NotFoundError, ValidationError } from "../utils/errors.js"; // Import custom errors
+import { TaskService, FullTaskData } from "../../../services/index.js"; // Assuming TaskService is exported from index
+import { logger } from "../../../utils/index.js";
+import { NotFoundError, ValidationError } from "../../../utils/errors.js"; // Import custom errors
 
 /**
  * Registers the updateTask tool with the MCP server.

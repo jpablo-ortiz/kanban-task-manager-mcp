@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { TaskPriority, TaskStatus } from "../types/taskTypes.js"; // Import shared types
+import { TaskPriority, TaskStatus } from "../../../types/taskTypes.js"; // Import shared types
 
 export const TOOL_NAME = "updateTask";
 

@@ -4,37 +4,45 @@ import {
   TOOL_NAME,
   TOOL_DESCRIPTION,
   TOOL_PARAMS,
-  ExportProjectArgs,
-} from "./exportProjectParams.js";
-import { ProjectService } from "../services/ProjectService.js"; // Assuming ProjectService is exported via services/index.js
-import { logger } from "../utils/logger.js";
-import { NotFoundError } from "../utils/errors.js";
+  GetNextTaskArgs,
+} from "./getNextTaskParams.js";
+import { TaskService } from "../../../services/index.js";
+import { logger } from "../../../utils/index.js";
+import { NotFoundError } from "../../../utils/errors.js";
 
 /**
- * Registers the exportProject tool with the MCP server.
+ * Registers the getNextTask tool with the MCP server.
  *
  * @param server - The McpServer instance.
- * @param projectService - An instance of the ProjectService.
+ * @param taskService - An instance of the TaskService.
  */
-export const exportProjectTool = (
+export const getNextTaskTool = (
   server: McpServer,
-  projectService: ProjectService
+  taskService: TaskService
 ): void => {
-  const processRequest = async (args: ExportProjectArgs) => {
+  const processRequest = async (args: GetNextTaskArgs) => {
     logger.info(`[${TOOL_NAME}] Received request with args:`, args);
     try {
-      // Zod schema ensures format is 'json' if provided, or defaults to 'json'
-      const jsonString = await projectService.exportProject(args.project_id);
+      // Call the service method to get the next task
+      const nextTask = await taskService.getNextTask(args.project_id);
 
       // Format the successful response
-      logger.info(
-        `[${TOOL_NAME}] Successfully exported project ${args.project_id}`
-      );
+      if (nextTask) {
+        logger.info(
+          `[${TOOL_NAME}] Next task found: ${nextTask.task_id} in project ${args.project_id}`
+        );
+      } else {
+        logger.info(
+          `[${TOOL_NAME}] No ready task found for project ${args.project_id}`
+        );
+      }
+
       return {
         content: [
           {
             type: "text" as const,
-            text: jsonString, // Return the JSON string directly
+            // Return the full task object or null
+            text: JSON.stringify(nextTask),
           },
         ],
       };
@@ -50,7 +58,7 @@ export const exportProjectTool = (
         const message =
           error instanceof Error
             ? error.message
-            : "An unknown error occurred while exporting the project.";
+            : "An unknown error occurred while getting the next task.";
         throw new McpError(ErrorCode.InternalError, message);
       }
     }

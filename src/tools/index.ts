@@ -7,20 +7,22 @@ import { TaskRepository } from "../repositories/TaskRepository.js"; // Added Tas
 import { ProjectService, TaskService } from "../services/index.js"; // Using barrel file, added TaskService
 
 // Import tool registration functions
-// import { exampleTool } from "./exampleTool.js"; // Commenting out example
-import { createProjectTool } from "./createProjectTool.js";
-import { addTaskTool } from "./addTaskTool.js";
-import { listTasksTool } from "./listTasksTool.js";
-import { showTaskTool } from "./showTaskTool.js";
-import { setTaskStatusTool } from "./setTaskStatusTool.js";
-import { expandTaskTool } from "./expandTaskTool.js";
-import { getNextTaskTool } from "./getNextTaskTool.js";
-import { exportProjectTool } from "./exportProjectTool.js";
-import { importProjectTool } from "./importProjectTool.js";
-import { updateTaskTool } from "./updateTaskTool.js";
-import { deleteTaskTool } from "./deleteTaskTool.js";
-import { deleteProjectTool } from "./deleteProjectTool.js";
-import { updateProjectTool } from "./updateProjectTool.js"; // Import the new updateProjectTool
+// Projects tools
+import { createProjectTool } from "./projects/create/createProjectTool.js";
+import { updateProjectTool } from "./projects/update/updateProjectTool.js";
+import { deleteProjectTool } from "./projects/delete/deleteProjectTool.js";
+import { exportProjectTool } from "./projects/export/exportProjectTool.js";
+import { importProjectTool } from "./projects/import/importProjectTool.js";
+
+// Tasks tools
+import { addTaskTool } from "./tasks/create/addTaskTool.js";
+import { updateTaskTool } from "./tasks/update/updateTaskTool.js";
+import { deleteTaskTool } from "./tasks/delete/deleteTaskTool.js";
+import { setTaskStatusTool } from "./tasks/status/setTaskStatusTool.js";
+import { expandTaskTool } from "./tasks/expand/expandTaskTool.js";
+import { listTasksTool } from "./tasks/query/listTasksTool.js";
+import { showTaskTool } from "./tasks/query/showTaskTool.js";
+import { getNextTaskTool } from "./tasks/query/getNextTaskTool.js";
 
 /**
  * Register all defined tools with the MCP server instance.
