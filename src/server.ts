@@ -1,4 +1,6 @@
-﻿import { createServer } from "./createServer.js";
+#!/usr/bin/env node
+
+import { createServer } from "./createServer.js";
 import { logger } from "./utils/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 // import { WebSocketServerTransport } from "@modelcontextprotocol/sdk/server/ws.js"; // Example for WebSocket

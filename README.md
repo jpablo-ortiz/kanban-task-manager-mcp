@@ -74,33 +74,178 @@ The following tools are available for MCP clients:
 
 *(Note: Refer to the corresponding `src/tools/*Params.ts` files for detailed Zod schemas and parameter descriptions.)*
 
-## Getting Started
+## Quick Start
+
+### Using npx (Recommended)
+
+The easiest way to use this MCP server is with npx:
+
+```bash
+npx mcp-task-manager-server
+```
+
+This will automatically download and run the latest version.
+
+### Local Development & Testing
+
+If you want to run this server locally without publishing to npm:
 
 1. **Prerequisites:** Node.js (LTS recommended), npm.
-2. **Install Dependencies:**
 
+2. **Install Dependencies:**
     ```bash
     npm install
     ```
 
-3. **Run in Development Mode:** (Uses `ts-node` and `nodemon` for auto-reloading)
-
-    ```bash
-    npm run dev
-    ```
-
-    The server will connect via stdio. Logs (JSON format) will be printed to stderr. The SQLite database will be created/updated in `./data/taskmanager.db`.
-4. **Build for Production:**
-
+3. **Build the Project:**
     ```bash
     npm run build
     ```
 
-5. **Run Production Build:**
+4. **Link for Local Testing (Recommended):**
+    ```bash
+    npm link
+    ```
+    
+    After linking, you can run the server from anywhere with:
+    ```bash
+    mcp-task-manager
+    ```
 
+#### Alternative Local Running Methods:
+
+- **Direct Node Execution:**
+    ```bash
+    node dist/server.js
+    ```
+
+- **Using npm start:**
     ```bash
     npm start
     ```
+
+- **Development Mode with Auto-reload:**
+    ```bash
+    npm run dev
+    ```
+
+All methods will create the SQLite database at `./data/taskmanager.db` and output structured JSON logs to stderr.
+
+## Integration with AI Tools
+
+### Claude Code Integration
+
+To use this MCP server with [Claude Code](https://claude.ai/code), add it to your MCP settings:
+
+1. **Option 1: Using npx (if published)**
+   
+   Create or edit your Claude Code MCP settings file (`~/.config/claude-code/mcp_servers.json` on macOS/Linux or `%APPDATA%\claude-code\mcp_servers.json` on Windows):
+
+   ```json
+   {
+     "mcpServers": {
+       "task-manager": {
+         "command": "npx",
+         "args": ["mcp-task-manager-server"],
+         "env": {
+           "DATABASE_PATH": "./tasks.db"
+         }
+       }
+     }
+   }
+   ```
+
+2. **Option 2: Using npm linked version (Local Development)**
+
+   ```json
+   {
+     "mcpServers": {
+       "task-manager": {
+         "command": "mcp-task-manager",
+         "env": {
+           "DATABASE_PATH": "./tasks.db"
+         }
+       }
+     }
+   }
+   ```
+
+3. **Option 3: Using absolute path**
+
+   ```json
+   {
+     "mcpServers": {
+       "task-manager": {
+         "command": "node",
+         "args": ["path/to/mcp-task-manager-server/dist/server.js"],
+         "env": {
+           "DATABASE_PATH": "./tasks.db"
+         }
+       }
+     }
+   }
+   ```
+
+### Cursor Integration
+
+To use this MCP server with [Cursor](https://cursor.sh/), configure it in your Cursor settings:
+
+1. **Open Cursor Settings** → **Features** → **Model Context Protocol**
+
+2. **Add Server Configuration:**
+
+   **Option A: Using npx (if published)**
+   ```json
+   {
+     "task-manager": {
+       "command": "npx",
+       "args": ["mcp-task-manager-server"],
+       "env": {
+         "DATABASE_PATH": "./cursor-tasks.db"
+       }
+     }
+   }
+   ```
+
+   **Option B: Using npm linked version (Local Development)**
+   ```json
+   {
+     "task-manager": {
+       "command": "mcp-task-manager",
+       "env": {
+         "DATABASE_PATH": "./cursor-tasks.db"
+       }
+     }
+   }
+   ```
+
+   **Option C: Using absolute path**
+   ```json
+   {
+     "task-manager": {
+       "command": "node",
+       "args": ["path/to/mcp-task-manager-server/dist/server.js"],
+       "env": {
+         "DATABASE_PATH": "./cursor-tasks.db"
+       }
+     }
+   }
+   ```
+
+3. **Restart Cursor** to load the MCP server.
+
+### Usage Examples
+
+Once configured, you can use the task manager in your AI conversations:
+
+```
+Create a new project called "Website Redesign"
+Add a task to analyze user feedback with high priority
+List all tasks in the project
+Mark the analysis task as in-progress
+Expand the analysis task into smaller subtasks
+Get the next task I should work on
+```
 
 ## Configuration
 

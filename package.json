@@ -1,9 +1,12 @@
 {
   "name": "mcp-task-manager-server",
   "version": "0.1.0",
-  "description": "My new MCP Server",
+  "description": "A Model Context Protocol (MCP) server for task and project management with SQLite persistence",
   "main": "dist/server.js",
   "type": "module",
+  "bin": {
+    "mcp-task-manager": "dist/server.js"
+  },
   "scripts": {
     "start": "node dist/server.js",
     "build": "tsc && copyfiles -f src/db/*.sql dist/db",
@@ -11,7 +14,8 @@
     "lint": "eslint . --ext .ts",
     "format": "prettier --write \"src/**/*.ts\"",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "prepare": "husky install || true"
+    "prepare": "husky install || true",
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "mcp",
