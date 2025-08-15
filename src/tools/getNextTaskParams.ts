@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from "zod";
 
 export const TOOL_NAME = "getNextTask";
 
@@ -12,9 +12,12 @@ Returns the full details of the next task, or null if no task is currently ready
 
 // Zod schema for the parameters, matching FR-007 and getNextTaskTool.md spec
 export const TOOL_PARAMS = z.object({
-    project_id: z.string()
-        .uuid("The project_id must be a valid UUID.")
-        .describe("The unique identifier (UUID) of the project to find the next task for."), // Required, UUID format
+  project_id: z
+    .string()
+    .uuid("The project_id must be a valid UUID.")
+    .describe(
+      "The unique identifier (UUID) of the project to find the next task for."
+    ), // Required, UUID format
 });
 
 // Define the expected type for arguments based on the Zod schema

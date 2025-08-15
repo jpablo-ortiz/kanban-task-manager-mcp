@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from "zod";
 
 export const TOOL_NAME = "importProject";
 
@@ -11,15 +11,21 @@ Returns the unique project_id of the newly created project upon success.
 
 // Zod schema for the parameters, matching FR-010 and importProjectTool.md spec
 export const TOOL_PARAMS = z.object({
-    project_data: z.string()
-        .min(1, "Project data cannot be empty.")
-        // Size validation happens in the service layer before parsing
-        .describe("Required. A JSON string containing the full project data, conforming to the export structure. Max size e.g., 10MB."), // Required, string
+  project_data: z
+    .string()
+    .min(1, "Project data cannot be empty.")
+    // Size validation happens in the service layer before parsing
+    .describe(
+      "Required. A JSON string containing the full project data, conforming to the export structure. Max size e.g., 10MB."
+    ), // Required, string
 
-    new_project_name: z.string()
-        .max(255, "New project name cannot exceed 255 characters.")
-        .optional()
-        .describe("Optional name for the newly created project (max 255 chars). If omitted, a name based on the original project name and import timestamp will be used."), // Optional, string, max length
+  new_project_name: z
+    .string()
+    .max(255, "New project name cannot exceed 255 characters.")
+    .optional()
+    .describe(
+      "Optional name for the newly created project (max 255 chars). If omitted, a name based on the original project name and import timestamp will be used."
+    ), // Optional, string, max length
 });
 
 // Define the expected type for arguments based on the Zod schema
