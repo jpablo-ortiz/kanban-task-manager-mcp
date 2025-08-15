@@ -213,7 +213,7 @@ export class ProjectService {
                 this.taskRepository.create(newTaskData, []);
 
                 if (taskFromFile.subtasks && taskFromFile.subtasks.length > 0) {
-                    taskFromFile.subtasks.forEach(subtask => processTask(subtask, newTaskId));
+                    taskFromFile.subtasks.forEach((subtask: any) => processTask(subtask, newTaskId));
                 }
             };
 

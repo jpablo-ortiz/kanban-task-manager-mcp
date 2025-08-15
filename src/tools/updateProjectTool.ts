@@ -1,15 +1,19 @@
-import { McpServer, McpError, ErrorCode } from "@modelcontextprotocol/sdk/server/mcp";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { ProjectService } from "../services/index.js"; // Assuming ProjectService is exported from services/index.ts
 import { logger } from "../utils/index.js"; // Assuming logger is exported from utils/index.ts
 import { UpdateProjectParamsSchema, UpdateProjectParams } from "./updateProjectParams.js";
 import { NotFoundError, ValidationError, ConflictError } from "../utils/errors.js"; // Import service level errors
 
 export const updateProjectTool = (server: McpServer, projectService: ProjectService) => {
-    server.tool( // Changed from server.registerTool to server.tool based on other tool examples
+    server.registerTool(
         "updateProject",
-        "Updates the name of an existing project. Requires project_id and the new project_name.",
-        UpdateProjectParamsSchema.shape, // Pass Zod shape for parameters
-        async (params: UpdateProjectParams, context: any) => { // Added context: any as per McpServer.tool signature
+        {
+            title: "Update Project",
+            description: "Updates the name of an existing project. Requires project_id and the new project_name.",
+            inputSchema: UpdateProjectParamsSchema.shape
+        },
+        async (params: UpdateProjectParams) => {
             logger.info({ tool: "updateProject", params }, "updateProject tool invoked");
             try {
                 // The service method updateProject returns the full updated project object.
@@ -26,11 +30,11 @@ export const updateProjectTool = (server: McpServer, projectService: ProjectServ
             } catch (error) {
                 logger.error({ tool: "updateProject", error }, "Error in updateProject tool");
                 if (error instanceof NotFoundError) {
-                    throw new McpError(ErrorCode.NotFound, error.message);
+                    throw new McpError(ErrorCode.MethodNotFound, error.message);
                 } else if (error instanceof ValidationError) {
                     throw new McpError(ErrorCode.InvalidParams, error.message);
                 } else if (error instanceof ConflictError) { // Although updateProject service doesn't throw ConflictError currently
-                    throw new McpError(ErrorCode.Conflict, error.message);
+                    throw new McpError(ErrorCode.InternalError, error.message);
                 }
                 // For other errors, throw a generic server error
                 throw new McpError(ErrorCode.InternalError, "An unexpected error occurred while updating the project.");

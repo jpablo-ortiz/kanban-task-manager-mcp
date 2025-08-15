@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"; // For type annotation
-import { ServerTransport } from "@modelcontextprotocol/sdk/server/transport.js"; // For type annotation
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { createServer } from "./createServer.js";
 import { logger } from "./utils/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -10,7 +10,7 @@ import { DatabaseManager } from "./db/DatabaseManager.js";
 
 const main = async () => {
     let server: McpServer | undefined;
-    let transport: ServerTransport | undefined;
+    let transport: Transport | undefined;
 
     const shutdown = async (signal?: string) => {
         logger.info(`Received ${signal || 'signal'}. Shutting down gracefully...`);
